@@ -11,10 +11,15 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Platform,
-  Keyboard
+  Keyboard,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomNav from '../Components/BottomNav'; // Impor BottomNav
+import { Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
+import { LogBox } from 'react-native';
 
 // Data dummy untuk kategori dan produk
 const categories = [
@@ -43,6 +48,9 @@ const index = () => {
   const [showCart, setShowCart] = useState(false);
   const [moneyGiven, setMoneyGiven] = useState('');
   const [change, setChange] = useState(0);
+  const router = useRouter();
+  const [salesData, setSalesData] = useState([]); // State untuk menyimpan data penjualan
+  LogBox.ignoreAllLogs(); // Menyembunyikan semua error dan warning
 
   // Filter produk berdasarkan kategori dan pencarian
   useEffect(() => {
@@ -63,6 +71,24 @@ const index = () => {
     setProducts(filteredProducts);
   }, [selectedCategory, searchQuery]);
 
+ useEffect(() => {
+  const fetchSalesData = async () => {
+    try {
+      const existingSales = await AsyncStorage.getItem('sales');
+      if (existingSales) {
+        const sales = JSON.parse(existingSales);
+        setSalesData(sales); // Simpan ke state
+        console.log('Data sales berhasil diambil:', sales); // Debugging
+      } else {
+        console.log('Tidak ada data sales tersimpan.');
+      }
+    } catch (error) {
+      console.error('Gagal mengambil data penjualan:', error);
+    }
+  };
+
+  fetchSalesData();
+}, []);
   // Fungsi untuk menambahkan produk ke keranjang
   const addToCart = (product) => {
     const existingItem = cart.find(item => item.id === product.id);
@@ -200,6 +226,68 @@ const index = () => {
     </View>
   );
 
+  const renderSaleItem = ({ item }) => (
+    <View style={styles.saleItem}>
+      <Text style={styles.saleDate}>
+        {new Date(item.date).toLocaleDateString('id-ID', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })}
+      </Text>
+      <Text style={styles.saleTotal}>Total: Rp {item.total.toLocaleString('id-ID')}</Text>
+      <Text style={styles.saleChange}>Kembalian: Rp {item.change.toLocaleString('id-ID')}</Text>
+      <FlatList
+        data={item.items}
+        renderItem={({ item: product }) => (
+          <View style={styles.saleProduct}>
+            <Text style={styles.saleProductName}>{product.name}</Text>
+            <Text style={styles.saleProductQuantity}>Jumlah: {product.quantity}</Text>
+            <Text style={styles.saleProductPrice}>Harga: Rp {product.price.toLocaleString('id-ID')}</Text>
+          </View>
+        )}
+        keyExtractor={(product) => product.id.toString()}
+      />
+    </View>
+  );
+  const handleCheckout = () => {
+    const money = unformatMoney(moneyGiven);
+    if (money >= cartTotal) {
+      saveSaleToLocalStorage();
+      Alert.alert('Pembayaran Berhasil', 'Terima kasih telah berbelanja!');
+      router.push('/Components/success');
+    } else {
+      Alert.alert('Pembayaran Gagal', 'Uang yang diberikan tidak cukup!');
+    }
+  };
+  const saveSaleToLocalStorage = async () => {
+    const saleData = {
+      date: new Date().toISOString(),
+      items: cart,
+      total: cartTotal,
+      moneyGiven: unformatMoney(moneyGiven),
+      change: change,
+    };
+  
+    try {
+      // Ambil data penjualan yang sudah ada
+      const existingSales = await AsyncStorage.getItem('sales');
+      const sales = existingSales ? JSON.parse(existingSales) : [];
+      
+      // Tambahkan penjualan baru
+      sales.push(saleData);
+      
+      // Simpan kembali ke local storage
+      await AsyncStorage.setItem('sales', JSON.stringify(sales));
+      
+      console.log('Data penjualan disimpan:', saleData);
+    } catch (error) {
+      console.error('Gagal menyimpan data penjualan:', error);
+    }
+  };
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
@@ -207,7 +295,7 @@ const index = () => {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>POS Makanan</Text>
+          <Text style={styles.headerTitle}>Selamat Datang, Kasir 1</Text>
           <Text style={styles.headerSubtitle}>
             {new Date().toLocaleDateString('id-ID', { 
               weekday: 'long', 
@@ -234,9 +322,14 @@ const index = () => {
       
       {/* Main Content */}
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={styles.content}
+  behavior={Platform.OS === "ios" ? "padding" : "height"}
+  style={{ flex: 1 }}
+>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
       >
+  
         {/* Search Bar */}
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
@@ -310,10 +403,14 @@ const index = () => {
                       Rp {change.toLocaleString('id-ID')}
                     </Text>
                   </View>
-                  <TouchableOpacity style={styles.checkoutButton}>
-                    <Text style={styles.checkoutButtonText}>Checkout</Text>
-                    <Ionicons name="arrow-forward" size={20} color="white" />
-                  </TouchableOpacity>
+                  <TouchableOpacity 
+                  style={styles.checkoutButton}
+                  onPress={handleCheckout} // Panggil handleCheckout
+                >
+                  <Text style={styles.checkoutButtonText}>Checkout</Text>
+                  <Ionicons name="arrow-forward" size={20} color="white" />
+                </TouchableOpacity>
+           
                 </View>
               </>
             ) : (
@@ -322,7 +419,10 @@ const index = () => {
                 <Text style={styles.emptyCartText}>Keranjang kosong</Text>
               </View>
             )}
+
+            
           </View>
+          
         ) : (
           // Products View
           <FlatList
@@ -333,9 +433,9 @@ const index = () => {
             contentContainerStyle={styles.productsList}
           />
         )}
+  
+      </ScrollView>
       </KeyboardAvoidingView>
-      
-     
     </SafeAreaView>
   );
 };
@@ -613,6 +713,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
+    marginBottom: 20
   },
   checkoutButtonText: {
     color: 'white',
@@ -630,6 +731,61 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     marginTop: 16,
+  },
+
+  salesContainer: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    elevation: 2,
+  },
+  salesTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 16,
+  },
+  salesList: {
+    paddingBottom: 16,
+  },
+  saleItem: {
+    marginBottom: 16,
+    padding: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+  },
+  saleDate: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  saleTotal: {
+    fontSize: 14,
+    color: '#4CAF50',
+    marginBottom: 4,
+  },
+  saleChange: {
+    fontSize: 14,
+    color: '#EA4335',
+    marginBottom: 8,
+  },
+  saleProduct: {
+    marginLeft: 8,
+    marginBottom: 8,
+  },
+  saleProductName: {
+    fontSize: 14,
+    color: '#333',
+  },
+  saleProductQuantity: {
+    fontSize: 12,
+    color: '#666',
+  },
+  saleProductPrice: {
+    fontSize: 12,
+    color: '#666',
   },
 });
 
