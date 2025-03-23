@@ -132,7 +132,7 @@ const index = () => {
       try {
         const authData = await AsyncStorage.getItem('auth');
         if (!authData) {
-          router.replace('/page/login'); // Arahkan ke halaman login jika tidak ada auth
+          router.replace('../splash'); // Arahkan ke halaman login jika tidak ada auth
         }
       } catch (error) {
         console.error('Gagal mengambil data auth:', error);
