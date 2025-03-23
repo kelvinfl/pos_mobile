@@ -15,13 +15,13 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import BottomNav from '../Components/BottomNav'; // Impor BottomNav
+import BottomNav from '../Components/BottomNav'; // Import BottomNav
 import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { LogBox } from 'react-native';
 
-// Data dummy untuk kategori dan produk
+// Data dummy untuk kategori
 const categories = [
   { id: 1, name: 'Semua' },
   { id: 2, name: 'Makanan Utama' },
@@ -30,7 +30,8 @@ const categories = [
   { id: 5, name: 'Dessert' },
 ];
 
-const initialProducts = [
+// Data awal untuk produk (akan digunakan hanya jika belum ada data di storage)
+const defaultProducts = [
   { id: 1, name: 'Nasi Goreng Spesial', price: 25000, category: 'Makanan Utama', image: 'https://img-global.cpcdn.com/recipes/0820c8cf5a5e18aa/1200x630cq70/photo.jpg' },
   { id: 2, name: 'Mie Goreng', price: 20000, category: 'Makanan Utama', image: 'https://assets.unileversolutions.com/v1/123561172.png' },
   { id: 3, name: 'Ayam Bakar', price: 30000, category: 'Makanan Utama', image: 'https://asset.kompas.com/crops/WTuA1Jn_cJEFlr9UgBhA-72n8yI=/3x0:700x465/1200x800/data/photo/2020/12/30/5fec5602f116e.jpg' },
@@ -38,11 +39,14 @@ const initialProducts = [
   { id: 5, name: 'Es Jeruk', price: 6000, category: 'Minuman', image: 'https://opendrinks.io/img/es-jeruk.8e8c9fa9.jpg' },
   { id: 6, name: 'Kentang Goreng', price: 15000, category: 'Snack', image: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRoNgSU5EE6zA0LNQsBMnFhdLFyV3bv3bXX7Q&s' },
   { id: 7, name: 'Es Krim', price: 10000, category: 'Dessert', image: 'https://asset.kompas.com/crops/pNMGp6ddQ59ympR3G6QHc0wi5c4=/350x314:1203x882/1200x800/data/photo/2022/08/17/62fcc65232caf.jpg' },
+  { id: 8, name: 'Es Krimw', price: 10000, category: 'Dessert', image: 'https://asset.kompas.com/crops/pNMGp6ddQ59ympR3G6QHc0wi5c4=/350x314:1203x882/1200x800/data/photo/2022/08/17/62fcc65232caf.jpg' },
 ];
 
 const index = () => {
   const [selectedCategory, setSelectedCategory] = useState('Semua');
-  const [products, setProducts] = useState(initialProducts);
+  const [username, setUsername] = useState('');
+  const [products, setProducts] = useState([]);  // Empty initial state
+  const [allProducts, setAllProducts] = useState([]); // State untuk menyimpan semua produk dari storage
   const [searchQuery, setSearchQuery] = useState('');
   const [cart, setCart] = useState([]);
   const [showCart, setShowCart] = useState(false);
@@ -50,45 +54,132 @@ const index = () => {
   const [change, setChange] = useState(0);
   const router = useRouter();
   const [salesData, setSalesData] = useState([]); // State untuk menyimpan data penjualan
+  const [loading, setLoading] = useState(true);
   LogBox.ignoreAllLogs(); // Menyembunyikan semua error dan warning
 
-  // Filter produk berdasarkan kategori dan pencarian
-  useEffect(() => {
-    let filteredProducts = [...initialProducts];
-    
-    if (selectedCategory !== 'Semua') {
-      filteredProducts = filteredProducts.filter(
-        product => product.category === selectedCategory
-      );
-    }
-    
-    if (searchQuery) {
-      filteredProducts = filteredProducts.filter(
-        product => product.name.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    }
-    
-    setProducts(filteredProducts);
-  }, [selectedCategory, searchQuery]);
 
- useEffect(() => {
-  const fetchSalesData = async () => {
+
+  // Fungsi untuk menyimpan produk ke AsyncStorage
+  const saveProductsToStorage = async (productsData) => {
     try {
-      const existingSales = await AsyncStorage.getItem('sales');
-      if (existingSales) {
-        const sales = JSON.parse(existingSales);
-        setSalesData(sales); // Simpan ke state
-        console.log('Data sales berhasil diambil:', sales); // Debugging
-      } else {
-        console.log('Tidak ada data sales tersimpan.');
-      }
+      await AsyncStorage.setItem('products', JSON.stringify(productsData));
+      console.log('Products berhasil disimpan ke storage');
     } catch (error) {
-      console.error('Gagal mengambil data penjualan:', error);
+      console.error('Gagal menyimpan products ke storage:', error);
     }
   };
 
-  fetchSalesData();
-}, []);
+  // Fungsi untuk mengambil produk dari AsyncStorage
+  const getProductsFromStorage = async () => {
+    try {
+      const storedProducts = await AsyncStorage.getItem('products');
+      
+      if (storedProducts) {
+        // Jika ada data di storage, gunakan data tersebut
+        const parsedProducts = JSON.parse(storedProducts);
+        setAllProducts(parsedProducts);
+        console.log('Products berhasil diambil dari storage:', parsedProducts.length, 'items');
+        return parsedProducts;
+      } else {
+        // Jika tidak ada data di storage, gunakan data default dan simpan ke storage
+        console.log('Tidak ada data products di storage, menggunakan data default');
+        await saveProductsToStorage(defaultProducts);
+        setAllProducts(defaultProducts);
+        return defaultProducts;
+      }
+    } catch (error) {
+      console.error('Gagal mengambil products dari storage:', error);
+      // Jika terjadi error, gunakan data default
+      setAllProducts(defaultProducts);
+      return defaultProducts;
+    }
+  };
+
+  // Load products dari storage saat aplikasi dimulai
+  useEffect(() => {
+    const initializeProducts = async () => {
+      const loadedProducts = await getProductsFromStorage();
+      filterProducts(loadedProducts, selectedCategory, searchQuery);
+    };
+
+    initializeProducts();
+  }, []);
+
+  // Fungsi untuk memfilter produk berdasarkan kategori dan pencarian
+  const filterProducts = (productsList, category, query) => {
+    let filtered = [...productsList];
+    
+    if (category !== 'Semua') {
+      filtered = filtered.filter(product => product.category === category);
+    }
+    
+    if (query) {
+      filtered = filtered.filter(
+        product => product.name.toLowerCase().includes(query.toLowerCase())
+      );
+    }
+    
+    setProducts(filtered);
+  };
+
+  // Filter produk ketika kategori atau pencarian berubah
+  useEffect(() => {
+    filterProducts(allProducts, selectedCategory, searchQuery);
+  }, [selectedCategory, searchQuery, allProducts]);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const authData = await AsyncStorage.getItem('auth');
+        if (!authData) {
+          router.replace('/page/login'); // Arahkan ke halaman login jika tidak ada auth
+        }
+      } catch (error) {
+        console.error('Gagal mengambil data auth:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAuth();
+  }, [router]); // Pastikan useEffect berjalan saat router berubah
+
+
+  // Ambil data penjualan dari storage
+  useEffect(() => {
+    const fetchSalesData = async () => {
+      try {
+        const existingSales = await AsyncStorage.getItem('sales');
+        if (existingSales) {
+          const sales = JSON.parse(existingSales);
+          setSalesData(sales); // Simpan ke state
+          console.log('Data sales berhasil diambil:', sales.length, 'items'); // Debugging
+        } else {
+          console.log('Tidak ada data sales tersimpan.');
+        }
+      } catch (error) {
+        console.error('Gagal mengambil data penjualan:', error);
+      }
+    };
+
+    fetchSalesData();
+  }, []);
+
+  useEffect(() => {
+    const fetchAuth = async () => {
+      try {
+        const authData = await AsyncStorage.getItem('auth');
+        if (authData) {
+          setUsername(authData); // Simpan isi auth ke state
+        }
+      } catch (error) {
+        console.error('Gagal mengambil data auth:', error);
+      }
+    };
+
+    fetchAuth();
+  }, []);
+
   // Fungsi untuk menambahkan produk ke keranjang
   const addToCart = (product) => {
     const existingItem = cart.find(item => item.id === product.id);
@@ -253,6 +344,7 @@ const index = () => {
       />
     </View>
   );
+
   const handleCheckout = () => {
     const money = unformatMoney(moneyGiven);
     if (money >= cartTotal) {
@@ -263,6 +355,7 @@ const index = () => {
       Alert.alert('Pembayaran Gagal', 'Uang yang diberikan tidak cukup!');
     }
   };
+
   const saveSaleToLocalStorage = async () => {
     const saleData = {
       date: new Date().toISOString(),
@@ -288,23 +381,24 @@ const index = () => {
       console.error('Gagal menyimpan data penjualan:', error);
     }
   };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
       
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Selamat Datang, Kasir 1</Text>
-          <Text style={styles.headerSubtitle}>
-            {new Date().toLocaleDateString('id-ID', { 
-              weekday: 'long', 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
-            })}
-          </Text>
-        </View>
+      <View>
+        <Text style={styles.headerTitle}>Selamat Datang, {username || 'Kasir'}</Text>
+        <Text style={styles.headerSubtitle}>
+          {new Date().toLocaleDateString('id-ID', { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          })}
+        </Text>
+      </View>
         <TouchableOpacity 
           style={styles.cartButton}
           onPress={() => setShowCart(!showCart)}
@@ -322,119 +416,119 @@ const index = () => {
       
       {/* Main Content */}
       <KeyboardAvoidingView
-  behavior={Platform.OS === "ios" ? "padding" : "height"}
-  style={{ flex: 1 }}
->
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
       >
-  
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Cari menu..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery ? (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={20} color="#666" />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        
-        {/* Categories */}
-        <FlatList
-          horizontal
-          data={categories}
-          renderItem={renderCategoryItem}
-          keyExtractor={item => item.id.toString()}
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoriesList}
-        />
-        
-        {/* Products */}
-        {showCart ? (
-          // Cart View
-          <View style={styles.cartContainer}>
-            <View style={styles.cartHeader}>
-              <Text style={styles.cartTitle}>Keranjang Belanja</Text>
-              <TouchableOpacity onPress={() => setCart([])}>
-                <Text style={styles.clearCartText}>Bersihkan</Text>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+        >
+    
+          {/* Search Bar */}
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Cari menu..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery ? (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={20} color="#666" />
               </TouchableOpacity>
-            </View>
-            
-            {cart.length > 0 ? (
-              <>
-                <FlatList
-                  data={cart}
-                  renderItem={renderCartItem}
-                  keyExtractor={item => item.id.toString()}
-                  style={styles.cartList}
-                />
-                
-                <View style={styles.cartFooter}>
-                  <View style={styles.cartTotalContainer}>
-                    <Text style={styles.cartTotalLabel}>Total:</Text>
-                    <Text style={styles.cartTotal}>
-                      Rp {cartTotal.toLocaleString('id-ID')}
-                    </Text>
-                  </View>
-                  <View style={styles.moneyInputContainer}>
-                    <TextInput
-                      style={styles.moneyInput}
-                      placeholder="Uang yang diberikan"
-                      keyboardType="numeric"
-                      value={moneyGiven}
-                      onChangeText={(text) => setMoneyGiven(formatMoney(text))}
-                      onBlur={() => {
-                        calculateChange();
-                        Keyboard.dismiss();
-                      }}
-                      returnKeyType="done"
-                    />
-                  </View>
-                  <View style={styles.changeContainer}>
-                    <Text style={styles.changeLabel}>Kembalian:</Text>
-                    <Text style={styles.changeAmount}>
-                      Rp {change.toLocaleString('id-ID')}
-                    </Text>
-                  </View>
-                  <TouchableOpacity 
-                  style={styles.checkoutButton}
-                  onPress={handleCheckout} // Panggil handleCheckout
-                >
-                  <Text style={styles.checkoutButtonText}>Checkout</Text>
-                  <Ionicons name="arrow-forward" size={20} color="white" />
-                </TouchableOpacity>
-           
-                </View>
-              </>
-            ) : (
-              <View style={styles.emptyCart}>
-                <Ionicons name="cart" size={80} color="#ddd" />
-                <Text style={styles.emptyCartText}>Keranjang kosong</Text>
-              </View>
-            )}
-
-            
+            ) : null}
           </View>
           
-        ) : (
-          // Products View
+          {/* Categories */}
           <FlatList
-            data={products}
-            renderItem={renderProductItem}
+            horizontal
+            data={categories}
+            renderItem={renderCategoryItem}
             keyExtractor={item => item.id.toString()}
-            numColumns={2}
-            contentContainerStyle={styles.productsList}
+            showsHorizontalScrollIndicator={false}
+            style={styles.categoriesList}
           />
-        )}
+          
+          {/* Products */}
+          {showCart ? (
+            // Cart View
+            <View style={styles.cartContainer}>
+              <View style={styles.cartHeader}>
+                <Text style={styles.cartTitle}>Keranjang Belanja</Text>
+                <TouchableOpacity onPress={() => setCart([])}>
+                  <Text style={styles.clearCartText}>Bersihkan</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {cart.length > 0 ? (
+                <>
+                  <FlatList
+                    data={cart}
+                    renderItem={renderCartItem}
+                    keyExtractor={item => item.id.toString()}
+                    style={styles.cartList}
+                  />
+                  
+                  <View style={styles.cartFooter}>
+                    <View style={styles.cartTotalContainer}>
+                      <Text style={styles.cartTotalLabel}>Total:</Text>
+                      <Text style={styles.cartTotal}>
+                        Rp {cartTotal.toLocaleString('id-ID')}
+                      </Text>
+                    </View>
+                    <View style={styles.moneyInputContainer}>
+                      <TextInput
+                        style={styles.moneyInput}
+                        placeholder="Uang yang diberikan"
+                        keyboardType="numeric"
+                        value={moneyGiven}
+                        onChangeText={(text) => setMoneyGiven(formatMoney(text))}
+                        onBlur={() => {
+                          calculateChange();
+                          Keyboard.dismiss();
+                        }}
+                        returnKeyType="done"
+                      />
+                    </View>
+                    <View style={styles.changeContainer}>
+                      <Text style={styles.changeLabel}>Kembalian:</Text>
+                      <Text style={styles.changeAmount}>
+                        Rp {change.toLocaleString('id-ID')}
+                      </Text>
+                    </View>
+                    <TouchableOpacity 
+                      style={styles.checkoutButton}
+                      onPress={handleCheckout}
+                    >
+                      <Text style={styles.checkoutButtonText}>Checkout</Text>
+                      <Ionicons name="arrow-forward" size={20} color="white" />
+                    </TouchableOpacity>
+             
+                  </View>
+                </>
+              ) : (
+                <View style={styles.emptyCart}>
+                  <Ionicons name="cart" size={80} color="#ddd" />
+                  <Text style={styles.emptyCartText}>Keranjang kosong</Text>
+                </View>
+              )}
   
-      </ScrollView>
+              
+            </View>
+            
+          ) : (
+            // Products View
+            <FlatList
+              data={products}
+              renderItem={renderProductItem}
+              keyExtractor={item => item.id.toString()}
+              numColumns={2}
+              contentContainerStyle={styles.productsList}
+            />
+          )}
+    
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
