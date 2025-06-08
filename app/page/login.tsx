@@ -1,19 +1,23 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
+import React, { useLayoutEffect, useState } from 'react';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function Login() {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const navigation = useNavigation();
     const router = useRouter();
-    navigation.setOptions({ headerShown: false }); // Sembunyikan header di halaman ini
+
+    // ✅ Pindahkan ini ke useLayoutEffect
+    useLayoutEffect(() => {
+        navigation.setOptions({ headerShown: false });
+    }, [navigation]);
+
     const handleLogin = async () => {
-    
         try {
-            await AsyncStorage.setItem('auth', 'user'); // Simpan status login
+            await AsyncStorage.setItem('auth', 'user');
             router.replace('/'); // Arahkan ke halaman utama
         } catch (error) {
             console.error('Gagal menyimpan status auth:', error);
@@ -22,15 +26,14 @@ export default function Login() {
 
     const handleOfflineMode = async () => {
         try {
-            await AsyncStorage.setItem('auth', 'offline'); // Simpan status offline
-            router.replace('/'); // Arahkan ke halaman utama
+            await AsyncStorage.setItem('auth', 'offline');
+            router.replace('/');
         } catch (error) {
             console.error('Gagal menyimpan status offline:', error);
         }
     };
 
     return (
-        
         <View style={styles.container}>
             <Text style={styles.title}>Login</Text>
             <TextInput

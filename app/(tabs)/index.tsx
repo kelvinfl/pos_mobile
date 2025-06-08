@@ -1,25 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  FlatList, 
-  Image, 
-  TextInput,
-  SafeAreaView,
-  StatusBar,
-  KeyboardAvoidingView,
-  Platform,
-  Keyboard,
-  ScrollView,
-} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import BottomNav from '../Components/BottomNav'; // Import BottomNav
-import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import { useRouter } from 'expo-router';
-import { LogBox } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  LogBox,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 // Data dummy untuk kategori
 const categories = [
@@ -69,31 +69,58 @@ const index = () => {
     }
   };
 
-  // Fungsi untuk mengambil produk dari AsyncStorage
-  const getProductsFromStorage = async () => {
-    try {
-      const storedProducts = await AsyncStorage.getItem('products');
-      
-      if (storedProducts) {
-        // Jika ada data di storage, gunakan data tersebut
-        const parsedProducts = JSON.parse(storedProducts);
-        setAllProducts(parsedProducts);
-        console.log('Products berhasil diambil dari storage:', parsedProducts.length, 'items');
-        return parsedProducts;
-      } else {
-        // Jika tidak ada data di storage, gunakan data default dan simpan ke storage
-        console.log('Tidak ada data products di storage, menggunakan data default');
-        await saveProductsToStorage(defaultProducts);
-        setAllProducts(defaultProducts);
-        return defaultProducts;
-      }
-    } catch (error) {
-      console.error('Gagal mengambil products dari storage:', error);
-      // Jika terjadi error, gunakan data default
-      setAllProducts(defaultProducts);
-      return defaultProducts;
+// Ambil produk dari AsyncStorage, dan jika tidak ada, fetch dari API jika online
+const getProductsFromStorage = async (clearFirst = false) => {
+  try {
+    if (clearFirst) {
+      await AsyncStorage.removeItem('products');
+      console.log('Data products berhasil dihapus dari storage.');
     }
-  };
+
+    const netState = await NetInfo.fetch();
+    const isConnected = netState.isConnected;
+
+    let storedProducts = await AsyncStorage.getItem('products');
+
+    if (isConnected) {
+      console.log('Internet tersedia, mengambil data dari API...');
+
+      const response = await fetch('https://pos.vincom.id/api/products');
+      if (!response.ok) {
+        throw new Error('Gagal mengambil data dari API');
+      }
+
+      const apiProducts = await response.json();
+
+      await AsyncStorage.setItem('products', JSON.stringify(apiProducts));
+      console.log(`Data dari API berhasil disimpan ke storage: ${apiProducts.length} items`);
+      storedProducts = JSON.stringify(apiProducts);
+    } else {
+      console.log('Tidak ada koneksi internet.');
+
+      if (!storedProducts) {
+        console.warn('Tidak ada data produk di storage dan tidak bisa ambil dari API (offline).');
+        setAllProducts([]); // Kosongkan state
+        return [];
+      }
+    }
+
+    const parsedProducts = JSON.parse(storedProducts);
+    setAllProducts(parsedProducts);
+    console.log('Products berhasil dimuat dari storage:', parsedProducts.length, 'items');
+
+    parsedProducts.forEach((item, index) => {
+      console.log(`${index + 1}. ${item.name} - Rp ${item.price.toLocaleString()}`);
+    });
+
+    return parsedProducts;
+  } catch (error) {
+    console.error('Gagal mengambil products:', error);
+    setAllProducts([]);
+    return [];
+  }
+};
+
 
   // Load products dari storage saat aplikasi dimulai
   useEffect(() => {
@@ -345,42 +372,112 @@ const index = () => {
     </View>
   );
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     const money = unformatMoney(moneyGiven);
+  
     if (money >= cartTotal) {
-      saveSaleToLocalStorage();
-      Alert.alert('Pembayaran Berhasil', 'Terima kasih telah berbelanja!');
-      router.push('/Components/success');
+      try {
+        await saveSale();  // Panggil fungsi saveSale yang sudah cek koneksi dan simpan data
+        Alert.alert('Pembayaran Berhasil', 'Terima kasih telah berbelanja!');
+        router.push('/Components/success');
+      } catch (error) {
+        Alert.alert('Error', 'Terjadi kesalahan saat menyimpan data penjualan.');
+        console.error(error);
+      }
     } else {
       Alert.alert('Pembayaran Gagal', 'Uang yang diberikan tidak cukup!');
     }
   };
-
-  const saveSaleToLocalStorage = async () => {
-    const saleData = {
-      date: new Date().toISOString(),
-      items: cart,
-      total: cartTotal,
-      moneyGiven: unformatMoney(moneyGiven),
-      change: change,
-    };
   
+  
+// Fungsi utama yang kamu panggil saat checkout
+const saveSale = async () => {
+  const state = await NetInfo.fetch();
+
+  if (state.isConnected) {
+    // Online, kirim ke API
     try {
-      // Ambil data penjualan yang sudah ada
-      const existingSales = await AsyncStorage.getItem('sales');
-      const sales = existingSales ? JSON.parse(existingSales) : [];
-      
-      // Tambahkan penjualan baru
-      sales.push(saleData);
-      
-      // Simpan kembali ke local storage
-      await AsyncStorage.setItem('sales', JSON.stringify(sales));
-      
-      console.log('Data penjualan disimpan:', saleData);
+      const subtotal = Number(cartTotal);
+      const kembalian = Number(change);
+      const dibayar = unformatMoney(moneyGiven);
+
+      const formattedItems = cart.map(item => ({
+        item_id: item.id,
+        qty: Number(item.quantity),
+        harga: Number(item.price),
+        total: Number(item.quantity * item.price),
+      }));
+
+      const saleData = {
+        user_id: 1,  // Ganti dengan user login sebenarnya kalau ada auth
+        subtotal,
+        dibayar,
+        kembalian,
+        items: formattedItems,
+        kode_penjualan: null, // biar backend generate otomatis
+      };
+
+      const response = await fetch('https://pos.vincom.id/api/penjualan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(saleData),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Gagal kirim data ke server: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('Data penjualan berhasil dikirim ke server:', result);
     } catch (error) {
-      console.error('Gagal menyimpan data penjualan:', error);
+      console.error('Gagal kirim ke server, simpan ke local storage:', error);
+      await saveToLocalStorage();
     }
-  };
+  } else {
+    // Offline, simpan ke local storage
+    console.log('Tidak ada koneksi internet, simpan ke local storage');
+    await saveToLocalStorage();
+  }
+};
+
+// Fungsi untuk simpan ke AsyncStorage
+const saveToLocalStorage = async () => {
+  try {
+    const subtotal = Number(cartTotal);
+    const kembalian = Number(change);
+    const dibayar = unformatMoney(moneyGiven);
+
+    const formattedItems = cart.map(item => ({
+      item_id: item.id,
+      qty: Number(item.quantity),
+      harga: Number(item.price),
+      total: Number(item.quantity * item.price),
+    }));
+
+    const saleData = {
+      user_id: 1,
+      subtotal,
+      dibayar,
+      kembalian,
+      items: formattedItems,
+      kode_penjualan: null,
+    };
+
+    const existingSales = await AsyncStorage.getItem('sales');
+    const sales = existingSales ? JSON.parse(existingSales) : [];
+
+    sales.push({
+      date: new Date().toISOString(),
+      ...saleData,
+    });
+
+    await AsyncStorage.setItem('sales', JSON.stringify(sales));
+    console.log('Data penjualan disimpan ke local storage');
+  } catch (error) {
+    console.error('Gagal menyimpan data ke local storage:', error);
+  }
+};
+  
 
   return (
     <SafeAreaView style={styles.container}>
